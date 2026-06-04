@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: primary-db-schema
+  namespace: default
+data:
+  init-schema.sql: |
+    -- Table mapping for models.Student struct
+    CREATE TABLE IF NOT EXISTS students (
+                                            id SERIAL PRIMARY KEY,
+                                            first_name VARCHAR(255) NOT NULL,
+        last_name VARCHAR(255) NOT NULL,
+        gender VARCHAR(50) NOT NULL,
+        date_of_birth TIMESTAMP WITH TIME ZONE NOT NULL,
+        inscription_date TIMESTAMP WITH TIME ZONE NOT NULL,
+                                       instrument VARCHAR(255) NOT NULL,
+        program VARCHAR(255) NOT NULL,
+        amount_owed NUMERIC(10, 2) NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                                       );
+
+    -- Table mapping for models.OutboxEvent struct
+    CREATE TABLE IF NOT EXISTS outbox (
+                                          id SERIAL PRIMARY KEY,
+        event_type VARCHAR(255) NOT NULL,
+        payload JSONB NOT NULL,
+        processed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        processed_at TIMESTAMP WITH TIME ZONE
+                                   );
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: primary-db
+  labels:
+    app: primary-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: primary-db
+  template:
+    metadata:
+      labels:
+        app: primary-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "music_academy"
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+          volumeMounts:
+            # Mount the schema file directly into the entrypoint initialization directory
+            - name: schema-volume
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        # Link the volume directly back to the schema configmap defined above
+        - name: schema-volume
+          configMap:
+            name: primary-db-schema
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: primary-db
+spec:
+  selector:
+    app: primary-db
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
+  type: ClusterIP

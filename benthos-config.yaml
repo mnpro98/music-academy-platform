@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: benthos-config
+  namespace: default
+data:
+  config.yaml: |
+    input:
+      nats_jetstream:
+        urls: [ "${NATS_URL:nats://localhost:4222}" ]
+        stream: "ACADEMY_EVENTS"
+        subject: "academy.student.StudentRegistered"
+        durable: "benthos_processor_mon"
+        deliver: "all"
+        ack_wait: 30s
+
+    pipeline:
+      processors:
+        - mapping: |
+            root = if this.amount_owed <= 0 {
+              deleted()
+            } else {
+              {
+                "student_id": this.id,
+                "full_name": this.first_name + " " + this.last_name,
+                "instrument": this.instrument,
+                "program": this.program,
+                "financials": {
+                  "amount_owed": this.amount_owed,
+                  "status": "unpaid"
+                },
+                "processed_at": now()
+              }
+            }
+
+    output:
+      mongodb:
+        url: "${MONGO_URL:mongodb://localhost:27017}"
+        database: "academy_analytics"
+        collection: "student_ledgers"
+        operation: "update-one"
+        upsert: true
+        write_concern:
+          w: "1"
+        filter_map: |
+          root.student_id = this.student_id
+        document_map: |
+          root = { "$set": this }
+

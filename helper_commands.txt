@@ -1,0 +1,16 @@
+ENTER POSTGRESQL
+
+kubectl exec -it deployment/primary-db -- psql -U postgres -d music_academy
+
+ENTER MONGODB
+
+kubectl exec -it secondary-db-7df487fbcd-57jj4 -- mongosh
+
+// 1. Switch to the database defined in your benthos.yaml
+use academy_analytics
+
+// 2. Count the total number of records to verify data is flowing
+db.student_ledgers.countDocuments()
+
+// 3. Retrieve and pretty-print the last 5 registered students
+db.student_ledgers.find().sort({ _id: -1 }).limit(5).pretty()

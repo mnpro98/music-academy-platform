@@ -1,0 +1,21 @@
+# Go binary outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+music-academy-platform
+
+# Local environment and secrets
+.env
+.env.local
+
+# IDE/Editor metadata configurations
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

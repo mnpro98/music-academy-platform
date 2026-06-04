@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: event-generator
+  labels:
+    app: event-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: event-generator
+  template:
+    metadata:
+      labels:
+        app: event-generator
+    spec:
+      containers:
+        - name: event-generator
+          image: event-generator:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # Resolves internally via cluster DNS to the Ingestion API service mapping
+            - name: INGESTION_API_HOST
+              value: "http://ingestion-api:8080"
+            # Adjust this value to throttle or speed up data ingestion rates
+            - name: GENERATION_INTERVAL
+              value: "1s"
+          resources:
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+            requests:
+              memory: "32Mi"
+              cpu: "50m"
