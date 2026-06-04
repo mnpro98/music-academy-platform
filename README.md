@@ -32,12 +32,13 @@ Before deploying the infrastructure, make sure you have:
 If you are using Minikube, point your terminal to use Minikube's internal Docker daemon so Kubernetes has direct access to your locally built images:
 ```bash
 eval $(minikube docker-env)
+```
 
 ### 2. Build the Application Components
 Compile and build the Docker images with this custom-made bash script:
 ```bash
-./deploy.sh```
-
+./deploy.sh
+```
 ---
 
 ## ⚙️ Dynamic Throughput Configuration
@@ -48,6 +49,7 @@ To change the generation interval directly inside the running cluster using vim:
 
 ```bash
 KUBE_EDITOR="vim" kubectl edit deploy event-generator
+```
 
 Locate the env array block within the pod specification and update the value:
 
@@ -58,6 +60,7 @@ spec:
       env:
         - name: GENERATION_INTERVAL
           value: "500ms"  # <- Edit this string to adjust the send rate
+```
 
 Upon saving and exiting (:wq), Kubernetes automatically performs a rolling restart to spin up a pod with the updated interval configuration.
 
@@ -77,3 +80,4 @@ kubectl exec -it <YOUR_MONGODB_POD_NAME> -- mongosh
 use academy_analytics
 db.student_ledgers.countDocuments()
 db.student_ledgers.find().sort({ _id: -1 }).limit(5).pretty()
+```
