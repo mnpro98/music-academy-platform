@@ -32,3 +32,48 @@ Before deploying the infrastructure, make sure you have:
 If you are using Minikube, point your terminal to use Minikube's internal Docker daemon so Kubernetes has direct access to your locally built images:
 ```bash
 eval $(minikube docker-env)
+
+### 2. Build the Application Components
+Compile and build the Docker images with this custom-made bash script:
+```bash
+./deploy.sh
+
+---
+
+## ⚙️ Dynamic Throughput Configuration
+
+The event generator allows you to throttle or accelerate ingestion throughput dynamically at runtime without rebuilding container code, using standard Go duration syntax (250ms, 1s, 5s).
+
+To change the generation interval directly inside the running cluster using vim:
+
+```bash
+KUBE_EDITOR="vim" kubectl edit deploy event-generator
+
+Locate the env array block within the pod specification and update the value:
+
+```bash
+spec:
+  containers:
+    - name: event-generator
+      env:
+        - name: GENERATION_INTERVAL
+          value: "500ms"  # <- Edit this string to adjust the send rate
+
+Upon saving and exiting (:wq), Kubernetes automatically performs a rolling restart to spin up a pod with the updated interval configuration.
+
+---
+
+## 🔍 Verification and Monitoring
+
+### Inspect the Analytical Datastore (MongoDB)
+
+To verify that filtered and transformed records successfully exit the Benthos pipeline and land in your analytics layer, exec directly into your MongoDB instance:
+
+```bash
+# Execute an interactive shell inside your MongoDB pod
+kubectl exec -it <YOUR_MONGODB_POD_NAME> -- mongosh
+
+# Run these commands inside the Mongo shell:
+use academy_analytics
+db.student_ledgers.countDocuments()
+db.student_ledgers.find().sort({ _id: -1 }).limit(5).pretty()
