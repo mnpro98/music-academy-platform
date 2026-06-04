@@ -36,7 +36,7 @@ eval $(minikube docker-env)
 ### 2. Build the Application Components
 Compile and build the Docker images with this custom-made bash script:
 ```bash
-./deploy.sh
+./deploy.sh```
 
 ---
 
