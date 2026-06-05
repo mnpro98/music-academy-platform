@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+// OutboxPublisher manages the background polling cycle and streaming operations.
 type OutboxPublisher struct {
 	db        *db.DB
 	natsConn  *nats.Conn
@@ -18,7 +19,9 @@ type OutboxPublisher struct {
 	interval  time.Duration
 }
 
+// NewOutboxPublisher initializes the publisher with database and NATS connections.
 func NewOutboxPublisher(database *db.DB, natsURL string, pollInterval time.Duration) (*OutboxPublisher, error) {
+	// Connect to the central NATS broker
 	nc, err := nats.Connect(natsURL,
 		nats.MaxReconnects(5),
 		nats.ReconnectWait(2*time.Second),
@@ -27,16 +30,19 @@ func NewOutboxPublisher(database *db.DB, natsURL string, pollInterval time.Durat
 		return nil, err
 	}
 
+	// Initialize the JetStream management context for persistent streaming capabilities
 	js, err := nc.JetStream()
 	if err != nil {
 		nc.Close()
 		return nil, err
 	}
 
+	// Ensure the target NATS Stream exists before starting the worker
+	// This ensures that any messages published to 'academy.student.*' are stored securely.
 	_, err = js.AddStream(&nats.StreamConfig{
 		Name:     "ACADEMY_EVENTS",
 		Subjects: []string{"academy.student.*"},
-		Storage:  nats.FileStorage,
+		Storage:  nats.FileStorage, // Retains messages safely on disk inside the broker
 	})
 	if err != nil {
 		log.Printf("Note: Stream initialization check returned: %v (It may already exist)\n", err)
@@ -50,6 +56,7 @@ func NewOutboxPublisher(database *db.DB, natsURL string, pollInterval time.Durat
 	}, nil
 }
 
+// Close gracefully terminates network connections when the worker shuts down.
 func (p *OutboxPublisher) Close() {
 	if p.natsConn != nil {
 		log.Println("Disconnecting cleanly from NATS broker...")
@@ -57,6 +64,7 @@ func (p *OutboxPublisher) Close() {
 	}
 }
 
+// Start boots up the ticking operational loop. It blocks until the context is canceled.
 func (p *OutboxPublisher) Start(ctx context.Context) {
 	log.Printf("Outbox background worker started. Scanning every %v for unprocessed logs...\n", p.interval)
 	ticker := time.NewTicker(p.interval)
@@ -75,13 +83,18 @@ func (p *OutboxPublisher) Start(ctx context.Context) {
 	}
 }
 
+// ProcessOutbox scans the database for unprocessed events and streams them downstream.
 func (p *OutboxPublisher) ProcessOutbox(ctx context.Context) error {
+	// 1. Open an isolation transaction block for safe multi-row updates
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
+	// 2. Query unprocessed events.
+	// HIGH CONCURRENCY TWEAK: 'FOR UPDATE SKIP LOCKED' prevents multiple instances
+	// of this worker from picking up or locking the exact same events simultaneously.
 	query := `
 		SELECT id, event_type, payload
 		FROM outbox
@@ -106,21 +119,26 @@ func (p *OutboxPublisher) ProcessOutbox(ctx context.Context) error {
 
 	if len(events) == 0 {
 		return tx.Commit()
-	}
+	} // No data to process during this cycle
 
 	log.Printf("Detected %d unprocessed registration events. Streaming to NATS JetStream...\n", len(events))
 
+	// 3. Iterate over the events and publish them to the message broker
 	updateQuery := `UPDATE outbox SET processed = true, processed_at = $1 WHERE id = $2;`
 
 	for _, event := range events {
 		subject := "academy.student." + event.EventType
 
+		// Publish the raw JSON payload to NATS JetStream and await an explicit Acknowledgement (ACK)
 		_, err = p.jsContext.Publish(subject, event.Payload)
 		if err != nil {
+			// If NATS is temporarily unavailable, skip this cycle.
+			// Thanks to the outbox pattern, events remain completely safe in PostgreSQL.
 			log.Printf("Streaming failed for event UUID %s: %v. Retrying in next cycle.\n", event.ID, err)
 			return err
 		}
 
+		// 4. Update the outbox row to mark it as successfully processed
 		_, err = tx.ExecContext(ctx, updateQuery, time.Now(), event.ID)
 		if err != nil {
 			return err

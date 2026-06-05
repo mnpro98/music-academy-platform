@@ -7,20 +7,23 @@ import (
 	"time"
 )
 
+// RegisterStudentRequest defines the expected incoming JSON payload contract.
 type RegisterStudentRequest struct {
 	FirstName   string  `json:"first_name"`
 	LastName    string  `json:"last_name"`
 	Gender      string  `json:"gender"`
-	DateOfBirth string  `json:"date_of_birth"`
+	DateOfBirth string  `json:"date_of_birth"` // Format: YYYY-MM-DD
 	Instrument  string  `json:"instrument"`
 	Program     string  `json:"program"`
 	AmountOwed  float64 `json:"amount_owed"`
 }
 
+// HandleRegisterStudent executes the atomic multi-table transactional insert.
 func (s *Server) HandleRegisterStudent() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req RegisterStudentRequest
 
+		// Decode and validate incoming JSON payload
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"Invalid request payload"}`, http.StatusBadRequest)
 			return
@@ -31,12 +34,14 @@ func (s *Server) HandleRegisterStudent() http.HandlerFunc {
 			return
 		}
 
+		// Parse the date of birth string into standard time.Time
 		dob, err := time.Parse("2006-01-02", req.DateOfBirth)
 		if err != nil {
 			http.Error(w, `{"error":"Invalid date_of_birth format. Use YYYY-MM-DD"}`, http.StatusBadRequest)
 			return
 		}
 
+		// Map payload parameters to our strong-typed Student model
 		student := models.Student{
 			FirstName:       req.FirstName,
 			LastName:        req.LastName,
@@ -49,12 +54,15 @@ func (s *Server) HandleRegisterStudent() http.HandlerFunc {
 			CreatedAt:       time.Now(),
 		}
 
+		// Open the Transaction Block
 		tx, err := s.DB.BeginTx(r.Context(), nil)
 		if err != nil {
 			http.Error(w, `{"error":"Could not start transaction"}`, http.StatusInternalServerError)
 			return
 		}
 
+		// Defer a rollback safety net. If the function exits early without calling tx.Commit(),
+		// Go safely discards any changes made during this block, preventing data corruption.
 		defer tx.Rollback()
 
 		studentInsertQuery := `
@@ -72,6 +80,7 @@ func (s *Server) HandleRegisterStudent() http.HandlerFunc {
 			return
 		}
 
+		// Serialize the saved student entity to bytes for the event payload
 		studentPayloadBytes, err := json.Marshal(student)
 		if err != nil {
 			http.Error(w, `{"error":"Failed to serialize event message"}`, http.StatusInternalServerError)

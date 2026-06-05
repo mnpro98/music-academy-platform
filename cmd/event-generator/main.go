@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+// SimulatedStudent represents the request payload format required by our API.
 type SimulatedStudent struct {
 	FirstName   string  `json:"first_name"`
 	LastName    string  `json:"last_name"`
@@ -87,10 +88,13 @@ func main() {
 	}
 }
 
+// generateMockStudent populates randomly selected criteria configurations.
 func generateMockStudent(r *rand.Rand) SimulatedStudent {
+	// Generate random age between 1980 and 2018
 	birthYear := r.Intn(38) + 1980
 	birthMonth := r.Intn(12) + 1
 
+	// Alternate debts dynamically: 30% of accounts hold an exact $0.0 balance to validate Benthos streaming filters
 	var balance float64
 	if r.Float32() > 0.30 {
 		balance = float64((r.Intn(6) + 1) * 1000) // Generates $1000, $2000... up to $6000

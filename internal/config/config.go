@@ -5,19 +5,26 @@ import (
 	"time"
 )
 
+// Config aggregates all operational environment parameters required
+// to boot and connect the microservices.
 type Config struct {
 	ServerPort string
 
+	// Primary Database Configuration (PostgreSQL)
 	DBHost     string
 	DBPort     string
 	DBUser     string
 	DBPassword string
 	DBName     string
 
-	NATSURL        string
-	OutboxInterval time.Duration
+	// Message Broker Configuration (NATS JetStream)
+	NATSURL string
+
+	OutboxInterval time.Duration // Added for high-frequency tuning
 }
 
+// Load reads values from the system environment variables.
+// If a variable is missing, it injects a sane local development default.
 func Load() *Config {
 	intervalStr := getEnv("OUTBOX_INTERVAL", "200ms")
 	interval, err := time.ParseDuration(intervalStr)
@@ -34,11 +41,14 @@ func Load() *Config {
 		DBPassword: getEnv("DB_PASSWORD", "postgres"),
 		DBName:     getEnv("DB_NAME", "music_academy"),
 
-		NATSURL:        getEnv("NATS_URL", "nats://localhost:4222"),
+		NATSURL: getEnv("NATS_URL", "nats://localhost:4222"),
+
 		OutboxInterval: interval,
 	}
 }
 
+// getEnv is a private helper function that fetches an environment variable
+// or falls back to a provided default string if the variable is uninitialized.
 func getEnv(key string, defaultVal string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
