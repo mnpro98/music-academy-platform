@@ -22,7 +22,7 @@ func main() {
 
 	cfg := config.Load()
 
-	// Initialize Primary Database Connection Pool (PostgreSQL)
+	// 1. Initialize Primary Database Connection Pool (PostgreSQL)
 	log.Printf("Connecting to primary database at %s:%s...\n", cfg.DBHost, cfg.DBPort)
 	database, err := db.ConnectPostgres(cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName)
 	if err != nil {
@@ -35,7 +35,7 @@ func main() {
 		}
 	}()
 
-	// Initialize and Start the Outbox Background Publisher
+	// 2. Initialize and Start the Outbox Background Publisher
 	log.Printf("Connecting Outbox Worker to NATS Broker at %s...\n", cfg.NATSURL)
 	outboxPub, err := worker.NewOutboxPublisher(database, cfg.NATSURL, cfg.OutboxInterval)
 	if err != nil {
@@ -43,19 +43,19 @@ func main() {
 	}
 	defer outboxPub.Close()
 
-	// Create a cancelable context to control the background worker's lifecycle
+	// 2.1 Create a cancelable context to control the background worker's lifecycle
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
 
-	// Launch the Outbox Publisher loop inside a background Goroutine
+	// 2.2 Launch the Outbox Publisher loop inside a background Goroutine
 	go func() {
 		outboxPub.Start(workerCtx)
 	}()
 
-	// Initialize Go-Chi Router Engine and Inject Dependencies
+	// 3. Initialize Go-Chi Router Engine and Inject Dependencies
 	serverApp := api.NewServer(database)
 
-	// Configure the Underlying HTTP Server
+	// 3.1 Configure the Underlying HTTP Server
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.ServerPort),
 		Handler:      serverApp.Router,
@@ -64,11 +64,11 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Channel to catch lifecycle interruption OS signals
+	// 3.2 Channel to catch lifecycle interruption OS signals
 	shutdownSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM)
 
-	// Spin up the HTTP server engine inside a background Goroutine
+	// 3.3 Spin up the HTTP server engine inside a background Goroutine
 	go func() {
 		log.Printf("Ingestion API Service listening on port %s\n", cfg.ServerPort)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
