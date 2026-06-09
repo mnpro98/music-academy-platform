@@ -29,36 +29,36 @@ This document describes the system architecture, design decisions, schema defini
 ```mermaid
 graph TD
     Gen[Client / Data Generator] -->|HTTP POST /api/v1/students| API[API Server]
-
+    
     subgraph Primary Transactional Boundary
         API -->|Begin ACID Transaction| DB[(Primary DB)]
         DB -->|Insert student record| T1[students table]
         DB -->|Insert event log| T2[outbox table]
     end
 
-    subgraph Streaming and ETL Processing
-        ETL[Streaming Processor] -->|Poll every 200ms - processed = false| T2
-        ETL -->|Publish Event - StudentRegistered| Broker((Message Broker))
-        Broker -->|Consumer Stream ACK| ETL
-        ETL -->|Evaluate balance and map schema| Filter{amount_owed > 0?}
+    subgraph Streaming and ETL Processing - every 200ms
+        API -->|Poll - processed = false| T2
+        API -->|Publish Event - StudentRegistered| Broker((Message Broker))
+        Broker -->|ACK| API
+        API -->|UPDATE outbox SET processed = true| T2
     end
 
     subgraph Secondary Analytical Layer
+        ETL -->|Poll events| Broker
+        ETL -->|Evaluate balance and map schema| Filter{amount_owed > 0?}
         Filter -->|Yes| Mongo[(Analytics Store)]
         Mongo -->|Update One / Upsert| Coll[student_ledgers collection]
         Filter -->|No| Skip[Dropped from Analytics Store]
     end
-
-    ETL -->|UPDATE outbox SET processed = true| T2
 ```
 
 The platform is deployed on **Kubernetes**. The core flow is:
 
 1. A data generator sends student registration events to the API server via `POST /api/v1/students`.
 2. The API persists the student record and an outbox event atomically in a single ACID transaction against the primary database.
-3. The streaming processor polls the outbox table every **200 milliseconds** and publishes events to the message broker.
-4. The streaming processor filters events by `amount_owed > 0` and upserts qualifying records into the analytics store. Records with no outstanding balance are dropped from the analytics stream.
-5. The outbox row is marked `processed = true` after successful acknowledgement.
+3. Asynchronously, the API polls the outbox table every **200 milliseconds** and publishes events to the message broker.
+4. The outbox row is marked `processed = true` after successful acknowledgement.
+5. The streaming processor filters events by `amount_owed > 0` and upserts qualifying records into the analytics store. Records with no outstanding balance are dropped from the analytics stream.
 
 ---
 
@@ -112,16 +112,17 @@ graph LR
 
 ### Option C — Transactional Outbox Pattern ✅ Selected
 
-Instead of the API server writing to the primary database and then immediately trying to communicate with the message broker over the network, it performs both writes inside a **single local ACID database transaction** — one to the `students` table and one to the `outbox` table. An asynchronous streaming processor later polls the outbox to safely route events.
+To avoid consistency issues with the API server writing to the primary database and then immediately trying to communicate with the message broker over the network, it performs both writes inside a **single local ACID database transaction** — one to the `students` table and one to the `outbox` table. An asynchronous process within the server later polls the outbox to safely route events.
 
 ```mermaid
 graph LR
     API[API Server] -->|Single ACID Transaction| PrimaryDB[(Primary DB)]
     PrimaryDB -->|students table| S[Student Record]
     PrimaryDB -->|outbox table| O[Outbox Event]
-    ETL[Streaming Processor] -->|Poll outbox| O
-    ETL -->|Publish| Broker((Message Broker))
-    Broker --> SecondaryDB[(Analytics Store)]
+    API[API Server] -->|Poll outbox| O
+    API -->|Publish| Broker((Message Broker))
+    ETL[Streaming Processor] -->|Poll| Broker
+    ETL --> SecondaryDB[(Analytics Store)]
 ```
 
 | | |
@@ -153,8 +154,8 @@ sequenceDiagram
     participant Gen as Client / Data Generator
     participant API as API Server
     participant DB as Primary DB
-    participant ETL as Streaming Processor
     participant Broker as Message Broker
+    participant ETL as Streaming Processor
     participant Mongo as Analytics Store
 
     Gen->>API: POST /api/v1/students
@@ -166,18 +167,20 @@ sequenceDiagram
     API-->>Gen: 201 Created
 
     loop Asynchronously every 200 milliseconds
-        ETL->>DB: SELECT * FROM outbox WHERE processed = false
-        DB-->>ETL: Return raw outbox rows
-        ETL->>Broker: Publish Event ("StudentRegistered")
-        Broker-->>ETL: Event received — ACK
-        Note over ETL: Execute Bloblang mapping and pipeline filter
+        API->>DB: SELECT * FROM outbox WHERE processed = false
+        DB-->>API: Return raw outbox rows
+        API->>Broker: Publish Event ("StudentRegistered")
+        Broker-->>API: Event received — ACK
+        API->>DB: UPDATE outbox SET processed = true, processed_at = NOW()
+    end
+    loop Asynchronously
+        ETL->>Broker: Read Event
         alt amount_owed > 0
             ETL->>Mongo: update-one / Upsert into student_ledgers
             Mongo-->>ETL: Insert successful
         else amount_owed == 0
             Note over ETL: Drop record from analytics stream
         end
-        ETL->>DB: UPDATE outbox SET processed = true, processed_at = NOW()
     end
 ```
 
